@@ -1,0 +1,5 @@
+{
+  "name": "Cloud Runner: Rhythm Cat",
+  "description": "An interactive rhythm game where you control a running cat through hand gestures, chasing bubbles generated from music beats.",
+  "requestFramePermissions": ["camera"]
+}
