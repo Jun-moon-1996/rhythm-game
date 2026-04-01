@@ -595,7 +595,7 @@ export default function App() {
             key="loading"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="relative w-full max-w-6xl aspect-video bg-cover bg-center rounded-2xl overflow-hidden shadow-2xl border-4 border-white/50 flex flex-col items-center justify-center"
+            className="relative w-full max-w-6xl aspect-video bg-cover bg-center rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center justify-center"
             style={{ backgroundImage: `url(${backgroundUrl})` }}
           >
             <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mb-4" />
@@ -608,7 +608,7 @@ export default function App() {
             key="game"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="relative w-full max-w-6xl aspect-video bg-cover bg-center rounded-2xl overflow-hidden shadow-2xl border-4 border-white/50"
+            className="relative w-full max-w-6xl aspect-video bg-cover bg-center rounded-2xl overflow-hidden shadow-2xl"
             style={{ backgroundImage: `url(${backgroundUrl})` }}
           >
             <GameCanvas
