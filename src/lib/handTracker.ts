@@ -24,7 +24,6 @@ export class HandTracker {
     });
 
     this.hands.onResults((results) => {
-      console.log('Hand results received:', results.multiHandLandmarks?.length || 0);
       this.onResults(results);
     });
   }

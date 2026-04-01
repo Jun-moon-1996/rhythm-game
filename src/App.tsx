@@ -8,7 +8,7 @@ import { Play, RotateCcw, Camera, Music, Keyboard, Check, Settings, ChevronLeft,
 import { CatType, PreloadedCatImage } from './types';
 import { CAT_IMAGES } from './constants';
 
-const AUDIO_URL = 'https://raw.githubusercontent.com/Jun-moon-1996/-music/main/fall%20in%20love.mp3';
+const AUDIO_URL = 'https://cdn.jsdelivr.net/gh/Jun-moon-1996/-music@main/fall%20in%20love.mp3'.replace(/ /g, '%20');
 
 const translations = {
   en: {
@@ -219,6 +219,8 @@ export default function App() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const handTrackerRef = useRef<HandTracker | null>(null);
+  const handDetectionCounter = useRef(0);
+  const lastHandY = useRef(0.5);
 
   // Preload cats on mount
   useEffect(() => {
@@ -251,7 +253,12 @@ export default function App() {
         if (!handTrackerRef.current) {
           handTrackerRef.current = new HandTracker(videoRef.current, (results) => {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-              setIsHandDetected(true);
+              // Stability counter to prevent flickering
+              handDetectionCounter.current = Math.min(5, handDetectionCounter.current + 1);
+              if (handDetectionCounter.current >= 2) {
+                setIsHandDetected(true);
+              }
+
               const landmarks = results.multiHandLandmarks[0];
               if (!landmarks || landmarks.length < 21) return;
               
@@ -291,15 +298,23 @@ export default function App() {
               
               const rawPalmY = count > 0 ? sumY / count : 0.5;
               
-              // Map 0.2-0.8 range to 0-1 for easier reach
-              const mappedY = (rawPalmY - 0.2) / 0.6;
+              // Map 0.3-0.7 range to 0-1 for even more sensitive reach in hard mode
+              const mappedY = (rawPalmY - 0.3) / 0.4;
               const finalY = Math.max(0, Math.min(1, mappedY));
               
               if (!isNaN(finalY)) {
-                setHandY(finalY);
+                // Only update state if change is significant (> 0.5 pixel on 600px height)
+                if (Math.abs(finalY - lastHandY.current) > 0.0008) {
+                  setHandY(finalY);
+                  lastHandY.current = finalY;
+                }
               }
             } else {
-              setIsHandDetected(false);
+              // Stability counter for hand loss
+              handDetectionCounter.current = Math.max(0, handDetectionCounter.current - 1);
+              if (handDetectionCounter.current === 0) {
+                setIsHandDetected(false);
+              }
             }
           });
         }
@@ -325,7 +340,8 @@ export default function App() {
         } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
           message = t.noCamera;
         } else {
-          message = `${t.initError}: ${err.message}`;
+          // Include the actual error message for better debugging
+          message = `${t.initError} (${err.message})`;
         }
       }
       setError(message);
@@ -377,7 +393,7 @@ export default function App() {
     window.addEventListener('keyup', handleKeyUp);
 
     let lastTime = performance.now();
-    const moveSpeed = 1.8; // Increased speed for better responsiveness
+    const moveSpeed = 3.5; // Increased speed (2.5 -> 3.5) for better responsiveness
 
     let frameId: number;
     const update = (time: number) => {
@@ -659,12 +675,20 @@ export default function App() {
                   ) : (
                     <>
                       <h2 className="text-5xl font-black text-white mb-8 tracking-tighter">{t.paused}</h2>
-                      <button
-                        onClick={() => setResumeCountdown(3)}
-                        className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-xl shadow-xl transition-all hover:scale-105"
-                      >
-                        {t.resume}
-                      </button>
+                      <div className="flex flex-col gap-4">
+                        <button
+                          onClick={() => setResumeCountdown(3)}
+                          className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-xl shadow-xl transition-all hover:scale-105"
+                        >
+                          {t.resume}
+                        </button>
+                        <button
+                          onClick={resetGame}
+                          className="flex items-center justify-center gap-2 px-10 py-4 bg-white/20 hover:bg-white/30 text-white border border-white/30 rounded-full font-bold text-xl shadow-xl transition-all hover:scale-105"
+                        >
+                          <RotateCcw size={24} /> {t.tryAgain}
+                        </button>
+                      </div>
                     </>
                   )}
                 </motion.div>

@@ -80,10 +80,8 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
     life: number, 
     color: string, 
     size: number,
-    type: 'star' | 'gummy' | 'heart' | 'emoji',
     rotation: number,
-    vRotation: number,
-    emoji?: string
+    vRotation: number
   }[]>([]);
   const bursts = useRef<{ x: number, y: number, radius: number, maxRadius: number, life: number, color: string, isSpecial?: boolean }[]>([]);
   const shake = useRef(0);
@@ -92,7 +90,7 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
   const catState = useRef<'normal' | 'prep' | 'taunt'>('normal');
   const catStateTimer = useRef(0);
   const screenFlash = useRef(0);
-  const floatingTexts = useRef<{ x: number, y: number, text: string, life: number, color: string, size: number, vx: number, vy: number }[]>([]);
+  const comboPop = useRef(1.0);
 
   const catImagesRef = useRef<Record<CatType, PreloadedCatImage | null>>({
     tuxedo_cat: null,
@@ -106,51 +104,6 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
       catImagesRef.current = preloadedCats;
     }
   }, [preloadedCats]);
-
-  useEffect(() => {
-    if (preloadedCats) return; // Skip if already preloaded
-
-    Object.entries(CAT_IMAGES).forEach(([type, url]) => {
-      const img = new Image();
-      img.src = url;
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        // Create a temporary canvas to find the bounding box of the cat head
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-        if (!tempCtx) return;
-
-        tempCanvas.width = img.width;
-        tempCanvas.height = img.height;
-        tempCtx.drawImage(img, 0, 0);
-
-        const imageData = tempCtx.getImageData(0, 0, img.width, img.height);
-        const data = imageData.data;
-
-        let minX = img.width, minY = img.height, maxX = 0, maxY = 0;
-        let found = false;
-
-        for (let y = 0; y < img.height; y++) {
-          for (let x = 0; x < img.width; x++) {
-            const alpha = data[(y * img.width + x) * 4 + 3];
-            if (alpha > 10) { // Threshold for non-transparent pixels
-              minX = Math.min(minX, x);
-              minY = Math.min(minY, y);
-              maxX = Math.max(maxX, x);
-              maxY = Math.max(maxY, y);
-              found = true;
-            }
-          }
-        }
-
-        const bounds = found 
-          ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-          : { x: 0, y: 0, w: img.width, h: img.height };
-
-        catImagesRef.current[type as CatType] = { img, bounds };
-      };
-    });
-  }, []);
 
   useEffect(() => {
     const ctx = audioContextRef.current;
@@ -206,15 +159,20 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         screenFlash.current -= 0.05;
       }
 
+      if (comboPop.current > 1.0) {
+        comboPop.current += (1.0 - comboPop.current) * 0.1;
+        if (comboPop.current < 1.01) comboPop.current = 1.0;
+      }
+
       // Update Cat position based on handYRef
-      // Smooth interpolation
-      const targetY = 100 + handYRef.current * 400;
+      // Ultra-snappy interpolation for minimum latency
+      const targetY = 80 + handYRef.current * 470;
       const dy = targetY - catPos.current.y;
-      catPos.current.y += dy * 0.35; // Increased lerp factor for snappier movement
+      catPos.current.y += dy * 0.98; // Increased from 0.85 to 0.98 for nearly instant follow
       
       // Calculate velocity for tilt effect
-      const currentVelocity = (handYRef.current - prevHandY.current) * 15;
-      catVelocity.current += (currentVelocity - catVelocity.current) * 0.15;
+      const currentVelocity = (handYRef.current - prevHandY.current) * 20; // Increased from 18 to 20
+      catVelocity.current += (currentVelocity - catVelocity.current) * 0.3; // Increased from 0.2 to 0.3 for faster response
       prevHandY.current = handYRef.current;
 
       // Update cat flash
@@ -222,7 +180,7 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
       
       // Update cat scale (pop effect on hit)
       if (catScale.current > 1.0) {
-        catScale.current -= 0.08;
+        catScale.current -= 0.023; // Reduced from 0.05 to extend duration by ~0.1s
         if (catScale.current < 1.0) catScale.current = 1.0;
       }
 
@@ -299,8 +257,8 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
 
       // Draw Particles
       particles.current = particles.current.filter(p => p.life > 0);
-      if (particles.current.length > 120) {
-        particles.current = particles.current.slice(-120);
+      if (particles.current.length > 200) {
+        particles.current = particles.current.slice(-200);
       }
       
       particles.current.forEach(p => {
@@ -314,38 +272,27 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         const alpha = Math.max(0, p.life);
         ctx.globalAlpha = alpha;
         
-        if (p.type === 'star') {
-          ctx.fillStyle = p.color;
-          const radius = Math.max(0, p.size * p.life);
-          const points = 5;
-          const inset = 0.5;
-          ctx.beginPath();
-          for (let i = 0; i < points * 2; i++) {
-            const r = i % 2 === 0 ? radius : radius * inset;
-            const angle = (i * Math.PI) / points - Math.PI / 2 + p.rotation;
-            ctx.lineTo(p.x + Math.cos(angle) * r, p.y + Math.sin(angle) * r);
-          }
-          ctx.closePath();
-          ctx.fill();
-        } else if (p.type === 'gummy') {
-          const size = Math.max(1.0, p.size * p.life);
-          // Simplified gradient for performance
-          ctx.fillStyle = p.color.replace('1)', `${alpha * 0.6})`);
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-          ctx.closePath();
-          ctx.fill();
+        ctx.fillStyle = p.color;
+        const radius = Math.max(0, p.size * p.life);
+        const points = 5;
+        const inset = 0.5;
+        ctx.beginPath();
+        for (let i = 0; i < points * 2; i++) {
+          const r = i % 2 === 0 ? radius : radius * inset;
+          const angle = (i * Math.PI) / points - Math.PI / 2 + p.rotation;
+          ctx.lineTo(p.x + Math.cos(angle) * r, p.y + Math.sin(angle) * r);
         }
-        
-        // Removed glitter trail for performance
+        ctx.closePath();
+        ctx.fill();
       });
       ctx.globalAlpha = 1.0;
 
       // Draw Bursts (Magical Halo)
       bursts.current = bursts.current.filter(b => b.life > 0);
       bursts.current.forEach(b => {
-        b.life -= 0.12; // Even faster, cleaner disappearance
-        b.radius += (b.maxRadius - b.radius) * 0.2;
+        // Special combo bursts linger slightly longer for better visual impact
+        b.life -= b.isSpecial ? 0.05 : 0.12; 
+        b.radius += (b.maxRadius - b.radius) * (b.isSpecial ? 0.1 : 0.2);
         
         const alpha = Math.max(0, b.life);
         ctx.save();
@@ -354,19 +301,20 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         if (b.isSpecial) {
           // Rainbow Halo Effect with Macaron Colors (Low Saturation)
           const macaronColors = ['#FFB4C8', '#B4DCFF', '#DCBEFF', '#FFFFB4', '#B4FFD2'];
-          ctx.lineWidth = 10; // Even thicker halo as requested
+          ctx.lineWidth = 12; // Even thicker halo
           macaronColors.forEach((color, i) => {
             ctx.strokeStyle = color;
             ctx.globalAlpha = alpha * (1 - i * 0.15);
             ctx.beginPath();
-            // Multiple rings for a "halo" look, max size is 2x bubble size
-            ctx.arc(b.x, b.y, Math.max(0.5, b.radius + i * 5), 0, Math.PI * 2);
+            // Multiple rings for a "halo" look
+            ctx.arc(b.x, b.y, Math.max(0.5, b.radius + i * 6), 0, Math.PI * 2);
             ctx.closePath();
             ctx.stroke();
           });
           
-          // Add a soft white glow (no shadow blur to avoid flickering)
+          // Add a soft white glow
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.lineWidth = 4;
           ctx.beginPath();
           ctx.arc(b.x, b.y, Math.max(0.5, b.radius), 0, Math.PI * 2);
           ctx.closePath();
@@ -396,25 +344,6 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         ctx.restore();
       });
 
-      // Draw Floating Texts
-      floatingTexts.current = floatingTexts.current.filter(t => t.life > 0);
-      floatingTexts.current.forEach(t => {
-        t.x += t.vx;
-        t.y += t.vy;
-        t.life -= 0.12; 
-        t.vy -= 0.05; // Float up
-        
-        const alpha = Math.max(0, t.life);
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = t.color;
-        ctx.font = `bold ${t.size}px Arial`;
-        ctx.textAlign = 'center';
-        // Removed expensive shadowBlur
-        ctx.fillText(t.text, t.x, t.y);
-        ctx.restore();
-      });
-
       // Handle Beats/Bubbles
       // leadTime determines how long a bubble takes to cross the screen
       const leadTime = 2.5;
@@ -441,7 +370,7 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
 
         ctx.save();
         const pulse = Math.sin(currentTime * 10) * (1 + beat.amplitude * 3);
-        const floatY = Math.sin(currentTime * 4 + beat.time) * 25;
+        const floatY = Math.sin(currentTime * 4 + beat.time) * 15; // Reduced float amplitude (25 -> 15)
         const currentY = y + floatY;
         
         // Approach scaling: grows slightly as it gets closer to the cat
@@ -481,7 +410,8 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         
         // Collision Detection
         const dist = Math.sqrt(Math.pow(x - catPos.current.x, 2) + Math.pow(currentY - catPos.current.y, 2));
-        const hitThreshold = currentSize + 55; // Increased hitbox for scaled up cat head
+        // Tightened hitbox for better rhythm accuracy (65 -> 48)
+        const hitThreshold = currentSize + 48; 
         
         if (dist < hitThreshold) {
           beat.hit = true;
@@ -493,34 +423,16 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
           
           let points = 5;
           let isSpecialBurst = false;
-          if (newCombo >= 10 && newCombo % 5 === 0) {
+          if (newCombo > 0 && newCombo % 10 === 0) {
             points += newCombo; 
             isSpecialBurst = true;
-            screenFlash.current = 0.4; 
-            shake.current = 12 + beat.amplitude * 15; 
-            
-            floatingTexts.current.push({
-              x, y: currentY - 40,
-              text: `${newCombo} COMBO!`,
-              life: 1.0,
-              color: '#F5F3FF', 
-              size: 24,
-              vx: (Math.random() - 0.5) * 2,
-              vy: -2
-            });
+            screenFlash.current = 0.25; 
+            shake.current = 15 + beat.amplitude * 20; 
+            comboPop.current = 1.6; // Pop the combo counter
           } else {
-            screenFlash.current = 0.2; 
-            shake.current = 6 + beat.amplitude * 8; 
-            
-            floatingTexts.current.push({
-              x, y: currentY - 20,
-              text: `+${points}`,
-              life: 0.8,
-              color: '#FFFFFF',
-              size: 18,
-              vx: (Math.random() - 0.5) * 1,
-              vy: -1.5
-            });
+            screenFlash.current = 0.12; 
+            shake.current = 0; // No vibration for normal hits as requested
+            comboPop.current = 1.0; // Stay stable
           }
           
           const newScore = scoreRef.current + points;
@@ -534,9 +446,8 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
             onNewHighScore(newScore);
           }
 
-          catFlash.current = 0.5; 
-          catScale.current = 1.1; 
-          
+          catScale.current = 1.25; 
+          catFlash.current = 0.6; 
           catState.current = 'taunt';
           catStateTimer.current = 0.5;
           
@@ -553,17 +464,17 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
             x,
             y: currentY,
             radius: currentSize,
-            maxRadius: isSpecialBurst ? currentSize * 2.5 : currentSize * 1.8,
+            maxRadius: isSpecialBurst ? currentSize * 3.0 : currentSize * 1.8,
             life: 1.0,
             color: isSpecialBurst ? 'rainbow' : 'white',
             isSpecial: isSpecialBurst
           });
 
-          // Scattered Particles (Reduced count for performance)
-          const particleCount = isSpecialBurst ? 40 : 20;
+          // Scattered Particles (Stars only)
+          const particleCount = isSpecialBurst ? 70 : 45; // Slightly increased count to maintain visual density
           for (let i = 0; i < particleCount; i++) {
             const angle = Math.random() * Math.PI * 2;
-            const speed = (Math.random() * 8 + 4) * (1 + beat.amplitude);
+            const speed = (Math.random() * 12 + 4) * (1 + beat.amplitude);
             
             particles.current.push({
               x, y: currentY,
@@ -571,10 +482,9 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
               vy: Math.sin(angle) * speed,
               life: 1.0,
               color: macaronColors[Math.floor(Math.random() * macaronColors.length)],
-              size: Math.random() * 6 + 3,
-              type: 'star',
+              size: Math.random() * 10 + 4, // Slightly increased max size for variety
               rotation: Math.random() * Math.PI * 2,
-              vRotation: (Math.random() - 0.5) * 0.2
+              vRotation: (Math.random() - 0.5) * 0.3
             });
           }
         }
@@ -605,8 +515,8 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         if (shake.current < 0.1) shake.current = 0;
       }
       
-      // Enlarge cat by 1.2x
-      ctx.scale(1.2, 1.2);
+      // Enlarge cat by 1.1x (reduced from 1.2x)
+      ctx.scale(1.1, 1.1);
 
       // Apply Squish (Prep)
       if (catState.current === 'taunt') {
@@ -659,6 +569,16 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
             bounds.x, bounds.y, bounds.w, bounds.h, // Source
             -bounds.w / 2, -bounds.h / 2, bounds.w, bounds.h // Destination
           );
+
+          // White flash overlay
+          if (catFlash.current > 0) {
+            ctx.save();
+            ctx.globalAlpha = catFlash.current * 0.8;
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = 'white';
+            ctx.fillRect(-bounds.w / 2, -bounds.h / 2, bounds.w, bounds.h);
+            ctx.restore();
+          }
           
           ctx.restore();
           return;
@@ -832,7 +752,9 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
       if (catFlash.current > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = catFlash.current * 0.4;
+        // Reduce flash for orange_tabby to avoid overexposure
+        const flashIntensity = catType === 'orange_tabby' ? 0.25 : 0.4;
+        ctx.globalAlpha = catFlash.current * flashIntensity;
         
         const catData = catImagesRef.current[catType];
         if (catData) {
@@ -863,14 +785,6 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
       const uiHeight = 36; // Aligned with py-2 + text-sm (36px)
       const barWidth = 280;
       
-      // Screen Flash
-      if (screenFlash.current > 0) {
-        ctx.save();
-        ctx.fillStyle = `rgba(255, 255, 255, ${screenFlash.current * 0.4})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.restore();
-      }
-
       ctx.save();
       // Removed expensive shadowBlur for performance
       
@@ -938,7 +852,8 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
       if (comboRef.current > 1) {
         ctx.save();
         ctx.fillStyle = '#F5F3FF'; // Very Light Purple
-        ctx.font = 'bold 32px Arial';
+        const fontSize = Math.floor(32 * comboPop.current);
+        ctx.font = `bold ${fontSize}px Arial`;
         ctx.textAlign = 'right';
         ctx.shadowBlur = 15;
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -956,6 +871,14 @@ export const GameCanvas = ({ beats, audioBuffer, duration, handY, onGameOver, on
         ctx.shadowColor = 'rgba(251, 191, 36, 0.5)';
         const bounce = Math.sin(currentTime * 5) * 10;
         ctx.fillText(language === 'en' ? 'NEW RECORD!' : '新纪录！', canvas.width / 2, 80 + bounce);
+        ctx.restore();
+      }
+
+      // Final Screen Flash Overlay (Softer)
+      if (screenFlash.current > 0) {
+        ctx.save();
+        ctx.fillStyle = `rgba(255, 255, 255, ${screenFlash.current * 0.5})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.restore();
       }
 
